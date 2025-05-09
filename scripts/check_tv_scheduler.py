@@ -29,6 +29,8 @@ def format_korean_datetime(date_str, day_of_week):
     return f"{year}년 {int(month):02d}월 {int(day):02d}일 ({day_of_week}요일)"
 
 def format_korean_time(time_str):
+    if pd.isna(time_str) or not str(time_str).strip():
+        return '-'
     hour, minute = map(int, time_str.split(':'))
     if hour == 0:
         period = '오전'
@@ -44,11 +46,13 @@ def format_korean_time(time_str):
         hour_display = hour - 12
     return f"{period} {hour_display}시 {minute:02d}분"
 
-def get_ad_type_label(ad_type):
+def get_ad_type_label(ad_type, program=None):
     if ad_type == '프로그램':
         return '방송 시작 전후 랜덤'
     elif ad_type == '중간광고':
         return '중간에 나오는 광고'
+    elif ad_type == '토막광고' and program:
+        return f'곧이어 OOOO가 방송됩니다'
     else:
         return ad_type
 
@@ -83,7 +87,6 @@ def check_tv_schedule():
     # 각 프로그램을 확인
     for _, row in today_programs.iterrows():
         start_hour, start_minute = format_time(row['start_time'])
-        end_hour, end_minute = format_time(row['end_time'])
 
         # 날짜를 datetime 객체로 변환하여 요일 추출
         date_obj = datetime.datetime.strptime(row['broadcast_date'], '%Y-%m-%d')
@@ -94,15 +97,18 @@ def check_tv_schedule():
         if start_notification_total_minute < 0:
             start_notification_total_minute += 24 * 60
 
-        # 종료 5분 전 시간 계산 (분 단위)
-        end_notification_total_minute = (end_hour * 60 + end_minute) - 5
-        if end_notification_total_minute < 0:
-            end_notification_total_minute += 24 * 60
+        # end_time이 없거나 NaN이면 종료 알림 로직은 건너뜀
+        if pd.isna(row['end_time']) or not str(row['end_time']).strip():
+            is_end_time = False
+        else:
+            end_hour, end_minute = format_time(row['end_time'])
+            end_notification_total_minute = (end_hour * 60 + end_minute) - 5
+            if end_notification_total_minute < 0:
+                end_notification_total_minute += 24 * 60
+            is_end_time = 0 <= (end_notification_total_minute - current_total_minute) < 5
 
         # 현재 시간이 시작 5분 전 0~4분 뒤(5분 미만)인지 확인
         is_start_time = 0 <= (start_notification_total_minute - current_total_minute) < 5
-        # 현재 시간이 종료 5분 전 0~4분 뒤(5분 미만)인지 확인
-        is_end_time = 0 <= (end_notification_total_minute - current_total_minute) < 5
 
         # 알림 조건 분기
         if row['ad_type'] == '중간광고':
@@ -129,6 +135,17 @@ def check_tv_schedule():
                 })
             if is_end_time:
                 ending_programs.append({
+                    "program": row['program'],
+                    "start_time": row['start_time'],
+                    "end_time": row['end_time'],
+                    "ad_type": row['ad_type'],
+                    "frequency": row['frequency'],
+                    "broadcast_date": row['broadcast_date'],
+                    "day_of_week": day_of_week
+                })
+        elif row['ad_type'] == '토막광고':
+            if is_start_time:
+                upcoming_programs.append({
                     "program": row['program'],
                     "start_time": row['start_time'],
                     "end_time": row['end_time'],
@@ -188,14 +205,12 @@ def check_tv_schedule():
                     "text": f"*{program['program']}*\n"
                             f"📅 방송 날짜: {format_korean_datetime(program.get('broadcast_date', current_date), program.get('day_of_week', ''))}\n"
                             f"▶️ 시작 시간: {format_korean_time(program['start_time'])}\n"
-                            f"⏱️ 종료 시간: {format_korean_time(program['end_time'])}\n"
-                            f"📺 광고 유형: {get_ad_type_label(program['ad_type'])}\n"
+                            f"⏱️ 종료 시간: {format_korean_time(program['end_time']) if program['end_time'] else '-'}\n"
+                            f"📺 광고 유형: {get_ad_type_label(program['ad_type'], program['program'])}\n"
                             f"🔄 노출 횟수: {program['frequency']}"
                 }
             }
             upcoming_payload["blocks"].append(program_block)
-
-            # 구분선 추가
             upcoming_payload["blocks"].append({"type": "divider"})
 
         # 마지막 구분선 제거
@@ -236,14 +251,12 @@ def check_tv_schedule():
                     "text": f"*{program['program']}*\n"
                             f"📅 방송 날짜: {format_korean_datetime(program.get('broadcast_date', current_date), program.get('day_of_week', ''))}\n"
                             f"▶️ 시작 시간: {format_korean_time(program['start_time'])}\n"
-                            f"⏱️ 종료 시간: {format_korean_time(program['end_time'])}\n"
-                            f"📺 광고 유형: {get_ad_type_label(program['ad_type'])}\n"
+                            f"⏱️ 종료 시간: {format_korean_time(program['end_time']) if program['end_time'] else '-'}\n"
+                            f"📺 광고 유형: {get_ad_type_label(program['ad_type'], program['program'])}\n"
                             f"🔄 노출 횟수: {program['frequency']}"
                 }
             }
             ending_payload["blocks"].append(program_block)
-
-            # 구분선 추가
             ending_payload["blocks"].append({"type": "divider"})
 
         # 마지막 구분선 제거
