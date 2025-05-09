@@ -1,0 +1,51 @@
+name: TV Ad Notification
+
+on:
+  schedule:
+    - cron: '*/10 * 8-31 5 *'     # 5월 8일-31일 (KST 5월 9일부터 6월 1일 8시 59분까지)
+    - cron: '*/10 * 1-7 6 *'      # 6월 1일-7일 (KST 6월 1일 9시부터 6월 8일 8시 59분까지)
+  workflow_dispatch:  # 수동 실행을 위한 트리거
+
+jobs:
+  check-tv-schedule:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python with dependency caching
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'requirements.txt'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check TV schedule and prepare notification
+        id: check_schedule
+        run: |
+          python scripts/check_tv_scheduler.py
+        env:
+          TZ: 'Asia/Seoul'  # 환경 변수로 한국 시간대 설정
+
+      - name: Send notification to Slack for upcoming programs
+        if: steps.check_schedule.outputs.has_upcoming_program == 'true'
+        uses: slackapi/slack-github-action@v1.23.0
+        with:
+          channel-id: '${{ secrets.SLACK_CHANNEL_ID }}'
+          payload: ${{ steps.check_schedule.outputs.upcoming_program_payload }}
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      - name: Send notification to Slack for ending programs
+        if: steps.check_schedule.outputs.has_ending_program == 'true'
+        uses: slackapi/slack-github-action@v1.23.0
+        with:
+          channel-id: '${{ secrets.SLACK_CHANNEL_ID }}'
+          payload: ${{ steps.check_schedule.outputs.ending_program_payload }}
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
